@@ -1,0 +1,69 @@
+
+
+    private Node criarVisualizacaoTransicao(Transicao transicao) {
+            Estado origem = transicao.getOrigem();
+            Estado destino = transicao.getDestino();
+            Group group = new Group();
+
+            if (origem == destino) {
+                Circle loop = new Circle(origem.getX(), origem.getY() - (STATE_RADIUS + 15), 15);
+                loop.setFill(Color.TRANSPARENT);
+                loop.setStroke(Color.BLACK);
+                loop.setStrokeWidth(1.5);
+
+                Polygon arrow = new Polygon();
+                arrow.getPoints().addAll(
+                        origem.getX() + 10, origem.getY() - (STATE_RADIUS + 15) - 15,
+                        origem.getX() + 15, origem.getY() - (STATE_RADIUS + 15) - 5,
+                        origem.getX() + 5, origem.getY() - (STATE_RADIUS + 15) - 5
+                );
+                arrow.setFill(Color.BLACK);
+
+                Text texto = new Text(origem.getX() - 10, origem.getY() - (STATE_RADIUS + 35), transicao.getSimbolo());
+                texto.setFont(Font.font(12));
+
+                group.getChildren().addAll(loop, arrow, texto);
+            } else {
+                double angle = Math.atan2(destino.getY() - origem.getY(), destino.getX() - origem.getX());
+
+                double startX = origem.getX() + STATE_RADIUS * Math.cos(angle);
+                double startY = origem.getY() + STATE_RADIUS * Math.sin(angle);
+                double endX = destino.getX() - STATE_RADIUS * Math.cos(angle);
+                double endY = destino.getY() - STATE_RADIUS * Math.sin(angle);
+
+                Line linha = new Line(startX, startY, endX, endY);
+                linha.setStrokeWidth(2.0);
+
+                double arrowLength = 12;
+                double arrowAngle = Math.toRadians(25);
+                Polygon arrow = new Polygon();
+                arrow.getPoints().addAll(
+                        endX, endY,
+                        endX - arrowLength * Math.cos(angle - arrowAngle), endY - arrowLength * Math.sin(angle - arrowAngle),
+                        endX - arrowLength * Math.cos(angle + arrowAngle), endY - arrowLength * Math.sin(angle + arrowAngle)
+                );
+                arrow.setFill(Color.BLACK);
+
+                Text texto = new Text(transicao.getSimbolo());
+                texto.setFont(Font.font("Arial", 12));
+                double textX = (startX + endX) / 2;
+                double textY = (startY + endY) / 2 - 8;
+                texto.setX(textX - texto.getLayoutBounds().getWidth() / 2);
+                texto.setY(textY);
+
+                group.getChildren().addAll(linha, arrow, texto);
+            }
+
+            ContextMenu contextMenu = new ContextMenu();
+            MenuItem editarItem = new MenuItem("Editar Símbolo(s)");
+            MenuItem deletarItem = new MenuItem("Deletar Transição");
+
+            editarItem.setOnAction(e -> editarTransicao(transicao));
+            deletarItem.setOnAction(e -> deletarTransicao(transicao));
+
+            contextMenu.getItems().addAll(editarItem, deletarItem);
+            group.setOnContextMenuRequested(event ->
+                    contextMenu.show(group, event.getScreenX(), event.getScreenY()));
+
+            return group;
+        }

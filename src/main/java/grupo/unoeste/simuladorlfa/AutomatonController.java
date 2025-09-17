@@ -2,6 +2,7 @@ package grupo.unoeste.simuladorlfa;
 
 import grupo.unoeste.simuladorlfa.entities.Estado;
 import grupo.unoeste.simuladorlfa.entities.Transicao;
+import javafx.animation.FadeTransition;
 import javafx.animation.PauseTransition;
 import javafx.animation.SequentialTransition;
 import javafx.application.Platform;
@@ -57,8 +58,10 @@ public class AutomatonController {
     // --- Para animação da simulação ---
     private final List<Group> highlightedStates = new ArrayList<>();
 
-    // --- Para simulação passo a passo ---
+    // --- Para simulação passo a passo (LÓGICA CORRIGIDA) ---
     private boolean stepByStepMode = false;
+    private List<String> wordsToSimulateStepByStep; // Lista de palavras
+    private int currentWordIndex = 0; // Índice da palavra atual
     private String currentWord = "";
     private int currentStep = 0;
     private List<Estado> currentPath = new ArrayList<>();
@@ -78,11 +81,8 @@ public class AutomatonController {
         logTextArea.setFont(Font.font("Consolas", 12));
         wordTextField.setOnAction(e -> simulateWord());
 
-        // Inicializar controles de passo a passo
         stepControlPanel.setVisible(false);
         stepInfoLabel.setText("");
-
-        // Configurar checkbox para mostrar transições epsilon
         showEpsilonTransitionsCheckBox.setSelected(true);
         showEpsilonTransitionsCheckBox.setOnAction(e -> updateAutomatonVisualization());
 
@@ -131,6 +131,56 @@ public class AutomatonController {
         });
     }
 
+    private void showWordToastNotification(String word) {
+        // 1. Cria o Label para a notificação
+        Label toastLabel = new Label("Simulando: " + (word.isEmpty() ? "ε" : word));
+
+        // 2. Estiliza o Label para parecer uma notificação
+        toastLabel.setStyle(
+                "-fx-background-color: rgba(0, 0, 0, 0.75);" + // Fundo preto semi-transparente
+                        "-fx-text-fill: white;" +                     // Texto branco
+                        "-fx-padding: 10px 20px;" +                   // Espaçamento interno
+                        "-fx-background-radius: 20;" +                // Bordas arredondadas
+                        "-fx-font-size: 16px;" +                      // Tamanho da fonte
+                        "-fx-font-weight: bold;" +
+                        "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.8), 10, 0, 0, 0);" // Sombra
+        );
+
+        // 3. Define a opacidade inicial como 0 (invisível)
+        toastLabel.setOpacity(0);
+
+        // Adiciona o label ao painel de desenho
+        drawingPane.getChildren().add(toastLabel);
+
+        // 4. Posiciona o label no centro superior da área de desenho
+        // Usamos runLater para garantir que o tamanho do label já foi calculado
+        Platform.runLater(() -> {
+            toastLabel.setLayoutX((drawingPane.getWidth() - toastLabel.getWidth()) / 2);
+            toastLabel.setLayoutY(20); // 20 pixels do topo
+        });
+
+        // 5. Cria a animação de Fade In (aparecer)
+        FadeTransition fadeIn = new FadeTransition(Duration.seconds(0.5), toastLabel);
+        fadeIn.setFromValue(0);
+        fadeIn.setToValue(1);
+
+        // 6. Cria uma pausa para manter a notificação visível
+        PauseTransition pause = new PauseTransition(Duration.seconds(1.5));
+
+        // 7. Cria a animação de Fade Out (desaparecer)
+        FadeTransition fadeOut = new FadeTransition(Duration.seconds(0.5), toastLabel);
+        fadeOut.setFromValue(1);
+        fadeOut.setToValue(0);
+
+        // 8. IMPORTANTE: Remove o label do painel quando a animação terminar
+        // para não acumular lixo na tela.
+        fadeOut.setOnFinished(event -> drawingPane.getChildren().remove(toastLabel));
+
+        // 9. Junta todas as animações em sequência e inicia
+        SequentialTransition sequentialTransition = new SequentialTransition(fadeIn, pause, fadeOut);
+        sequentialTransition.play();
+    }
+
     private void setupControlButtons() {
         simulateButton.setOnAction(e -> simulateWord());
         stepByStepButton.setOnAction(e -> startStepByStepSimulation());
@@ -140,60 +190,95 @@ public class AutomatonController {
         resetStepButton.setOnAction(e -> resetStepByStep());
     }
 
-    // --- SIMULAÇÃO PASSO A PASSO ---
+    // --- SIMULAÇÃO PASSO A PASSO (MÉTODOS CORRIGIDOS) ---
 
     @FXML
     private void startStepByStepSimulation() {
-        String word = wordTextField.getText().trim();
-
-        if (word.contains(",")) {
-            showAlert("Aviso", "Simulação passo a passo funciona apenas com uma palavra por vez.\nPrimeira palavra será usada: '" + word.split(",")[0].trim() + "'");
-            word = word.split(",")[0].trim();
-        }
-
-        clearHighlights();
+        String fullInput = wordTextField.getText();
 
         if (estados.isEmpty()) {
             showResult("Erro: Nenhum autômato para simular!", false);
             return;
         }
 
-        currentWord = word;
-        currentStep = 0;
+        // Prepara a lista de palavras (COM A CORREÇÃO)
+        wordsToSimulateStepByStep = new ArrayList<>(Arrays.asList(fullInput.split(",")));
+        for (int i = 0; i < wordsToSimulateStepByStep.size(); i++) {
+            wordsToSimulateStepByStep.set(i, wordsToSimulateStepByStep.get(i).trim());
+        }
+
+        currentWordIndex = 0;
         stepByStepMode = true;
 
-        // Executar simulação completa para obter o caminho
+        // Desabilitar botões e mostrar painel de controle
+        stepControlPanel.setVisible(true);
+        simulateButton.setDisable(true);
+        stepByStepButton.setDisable(true);
+        logMessage("\n=== INICIANDO SIMULAÇÃO PASSO A PASSO EM LOTE ===");
+
+        // Configura e inicia a simulação para a primeira palavra da lista
+        setupStepByStepForCurrentWord();
+    }
+
+    private void setupStepByStepForCurrentWord() {
+        clearHighlights();
+        resultLabel.setText("");
+
+        // Pega a palavra atual da lista
+        currentWord = wordsToSimulateStepByStep.get(currentWordIndex);
+        currentStep = 0;
+
+        // --- ADICIONE A CHAMADA AQUI ---
+        // Mostra a notificação "toast" com a palavra atual
+        showWordToastNotification(currentWord);
+        // ---------------------------------
+
+        // Executa a simulação para obter o caminho da palavra atual
         lastResult = AutomatonSimulator.simulate(estados, transicoes, currentWord);
         currentPath = lastResult.getPath();
         currentSymbolsUsed = lastResult.getSymbolsUsed();
 
-        // Mostrar controles de passo a passo
-        stepControlPanel.setVisible(true);
-        simulateButton.setDisable(true);
-        stepByStepButton.setDisable(true);
+        logMessage("\n--- Iniciando Passo a Passo para a palavra '" + (currentWord.isEmpty() ? "ε" : currentWord) + "' (" + (currentWordIndex + 1) + "/" + wordsToSimulateStepByStep.size() + ") ---");
 
-        logMessage("\n=== INICIANDO SIMULAÇÃO PASSO A PASSO ===");
-        logMessage("Palavra: '" + (currentWord.isEmpty() ? "ε" : currentWord) + "'");
-        logMessage("Caminho encontrado: " + currentPath.size() + " estados");
-
-        // Mostrar primeiro passo
+        // Atualiza a exibição para o primeiro passo
         updateStepDisplay();
         updateStepControls();
     }
 
     @FXML
     private void nextStep() {
+        // Se ainda há passos na palavra atual, avança o passo
         if (currentStep < currentPath.size() - 1) {
             currentStep++;
             updateStepDisplay();
             updateStepControls();
         }
+        // Se chegou ao fim da palavra atual E existem mais palavras para simular
+        else if (currentWordIndex < wordsToSimulateStepByStep.size() - 1) {
+            currentWordIndex++; // Avança para a próxima palavra
+            logMessage("--- Próxima palavra ---");
+            // Adiciona uma pequena pausa para o usuário perceber a transição
+            PauseTransition pause = new PauseTransition(Duration.seconds(1));
+            pause.setOnFinished(e -> setupStepByStepForCurrentWord());
+            pause.play();
+        }
     }
 
     @FXML
     private void prevStep() {
+        // Se não está no primeiro passo da palavra atual, volta o passo
         if (currentStep > 0) {
             currentStep--;
+            updateStepDisplay();
+            updateStepControls();
+        }
+        // Se está no primeiro passo, mas não é a primeira palavra da lista
+        else if (currentWordIndex > 0) {
+            currentWordIndex--; // Volta para a palavra anterior
+            logMessage("--- Palavra anterior ---");
+            // Configura a simulação para a palavra anterior e vai para o ÚLTIMO passo dela
+            setupStepByStepForCurrentWord();
+            currentStep = currentPath.size() > 0 ? currentPath.size() - 1 : 0; // Vai para o último passo
             updateStepDisplay();
             updateStepControls();
         }
@@ -203,6 +288,10 @@ public class AutomatonController {
     private void resetStepByStep() {
         stepByStepMode = false;
         currentStep = 0;
+        currentWordIndex = 0;
+        if (wordsToSimulateStepByStep != null) {
+            wordsToSimulateStepByStep.clear();
+        }
         clearHighlights();
 
         stepControlPanel.setVisible(false);
@@ -218,6 +307,9 @@ public class AutomatonController {
         clearHighlights();
 
         if (currentPath.isEmpty() || currentStep >= currentPath.size()) {
+            if (lastResult != null) {
+                showResult(lastResult.getMessage(), lastResult.isAccepted());
+            }
             return;
         }
 
@@ -230,9 +322,10 @@ public class AutomatonController {
             highlightState(stateView, true, isAccepted);
         }
 
-        // Atualizar informações do passo
+        // Atualizar informações do passo (COM CONTAGEM DE PALAVRAS)
         StringBuilder stepInfo = new StringBuilder();
-        stepInfo.append("Passo ").append(currentStep + 1).append(" de ").append(currentPath.size());
+        stepInfo.append("Palavra ").append(currentWordIndex + 1).append("/").append(wordsToSimulateStepByStep.size());
+        stepInfo.append(" | Passo ").append(currentStep + 1).append(" de ").append(currentPath.size());
         stepInfo.append(" | Estado: ").append(currentState.getNome());
 
         if (currentStep == 0) {
@@ -240,44 +333,34 @@ public class AutomatonController {
         } else {
             String symbolUsed = currentStep - 1 < currentSymbolsUsed.size() ?
                     currentSymbolsUsed.get(currentStep - 1) : "?";
-            stepInfo.append(" | Símbolo consumido: '").append(symbolUsed).append("'");
+            stepInfo.append(" | Símbolo: '").append(symbolUsed).append("'");
         }
 
         if (currentStep == currentPath.size() - 1) {
-            stepInfo.append(" | Estado ").append(currentState.isFinal() ? "FINAL" : "NÃO-FINAL");
+            stepInfo.append(" | ").append(currentState.isFinal() ? "FINAL" : "NÃO-FINAL");
         }
 
         stepInfoLabel.setText(stepInfo.toString());
 
-        // Mostrar progresso da palavra
-        StringBuilder wordProgress = new StringBuilder();
-        if (currentWord.isEmpty()) {
-            wordProgress.append("Palavra: ε");
-        } else {
-            wordProgress.append("Palavra: ");
-            for (int i = 0; i < currentWord.length(); i++) {
-                if (i < currentStep && currentStep > 0 && i < currentSymbolsUsed.size()) {
-                    wordProgress.append("[").append(currentWord.charAt(i)).append("]");
-                } else if (i == currentStep - 1 && currentStep > 0) {
-                    wordProgress.append("→").append(currentWord.charAt(i)).append("←");
-                } else {
-                    wordProgress.append(currentWord.charAt(i));
-                }
-            }
-        }
-
-        logMessage("Passo " + (currentStep + 1) + ": " + stepInfo.toString());
+        logMessage("Passo " + (currentStep + 1) + ": " + currentState.getNome());
         if (currentStep == currentPath.size() - 1) {
             showResult(lastResult.getMessage(), lastResult.isAccepted());
+        } else {
+            resultLabel.setText("");
         }
     }
 
     private void updateStepControls() {
-        nextStepButton.setDisable(currentStep >= currentPath.size() - 1);
-        prevStepButton.setDisable(currentStep <= 0);
+        // Desabilita "Próximo" se for o último passo da última palavra
+        boolean isLastStepOfLastWord = (currentStep >= currentPath.size() - 1) && (currentWordIndex >= wordsToSimulateStepByStep.size() - 1);
+        nextStepButton.setDisable(isLastStepOfLastWord);
+
+        // Desabilita "Anterior" se for o primeiro passo da primeira palavra
+        boolean isFirstStepOfFirstWord = (currentStep <= 0) && (currentWordIndex <= 0);
+        prevStepButton.setDisable(isFirstStepOfFirstWord);
     }
 
-    // --- MÉTODOS DE CRIAÇÃO E MANIPULAÇÃO DE ESTADOS ---
+    // --- O RESTANTE DA CLASSE (MÉTODOS DE CRIAÇÃO, SIMULAÇÃO NORMAL, ETC.) PERMANECE O MESMO ---
 
     private void criarNovoEstado(double x, double y) {
         Estado novoEstado = new Estado(x, y);
@@ -434,8 +517,6 @@ public class AutomatonController {
         updateAutomatonTypeDisplay();
     }
 
-    // --- MÉTODOS DE CRIAÇÃO E MANIPULAÇÃO DE TRANSIÇÕES ---
-
     private void criarNovaTransicao(Estado origem, Estado destino) {
         String header = "Digite o símbolo(s) para a transição de " +
                 origem.getNome() + " para " + destino.getNome() + ":";
@@ -577,12 +658,10 @@ public class AutomatonController {
         updateAutomatonTypeDisplay();
     }
 
-    // --- SIMULAÇÃO NORMAL ---
-
     @FXML
     private void simulateWord() {
         if (stepByStepMode) {
-            return; // Não permitir simulação normal durante passo a passo
+            return;
         }
 
         String fullInput = wordTextField.getText();
@@ -647,12 +726,10 @@ public class AutomatonController {
 
     private SequentialTransition createPathAnimation(List<Estado> path, boolean accepted) {
         SequentialTransition animation = new SequentialTransition();
-
         for (int i = 0; i < path.size(); i++) {
             final int index = i;
             Estado estado = path.get(i);
             Group stateView = estadoViews.get(estado);
-
             if (stateView != null) {
                 PauseTransition pause = new PauseTransition(Duration.seconds(0.7));
                 pause.setOnFinished(e -> {
@@ -671,7 +748,6 @@ public class AutomatonController {
     private void highlightState(Group stateView, boolean highlight, boolean isFinalAndAccepted) {
         if (stateView == null) return;
         Circle circle = (Circle) stateView.lookup("#main-circle");
-
         if (highlight) {
             if (isFinalAndAccepted) {
                 circle.setStroke(Color.LIMEGREEN);
@@ -697,8 +773,6 @@ public class AutomatonController {
         });
         highlightedStates.clear();
     }
-
-    // --- MÉTODOS UTILITÁRIOS ---
 
     private Group findNearestStateGroup(double x, double y) {
         return estadoViews.values().stream()
@@ -791,21 +865,12 @@ public class AutomatonController {
     }
 
     private void updateAutomatonVisualization() {
-        // Atualizar visibilidade de transições epsilon se necessário
         boolean showEpsilon = showEpsilonTransitionsCheckBox.isSelected();
-
-        transicaoViews.forEach((transicao, view) -> {
-            if (transicao.isEpsilon() && !showEpsilon) {
-                view.setVisible(false);
-            } else {
-                view.setVisible(true);
-            }
-        });
+        transicaoViews.forEach((transicao, view) -> view.setVisible(showEpsilon || !transicao.isEpsilon()));
     }
 
     @FXML
     private void clearAll() {
-        // Resetar modo passo a passo se estiver ativo
         if (stepByStepMode) {
             resetStepByStep();
         }
@@ -832,8 +897,6 @@ public class AutomatonController {
             logTextArea.setScrollTop(Double.MAX_VALUE);
         });
     }
-
-    // --- MÉTODOS PARA EXPORTAR/IMPORTAR AUTÔMATO ---
 
     @FXML
     private void exportAutomaton() {

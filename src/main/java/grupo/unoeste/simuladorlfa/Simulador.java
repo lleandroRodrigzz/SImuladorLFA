@@ -72,8 +72,34 @@ public class Simulador {
                     break;
                 }
                 case 2: {
-                    System.out.println("Funcionalidade de geração de palavras não implementada nesta versão.");
-                    System.out.println("Para implementar, seria necessário incluir a biblioteca Generex.");
+                    Set<String> palavrasGeradas = new HashSet<>();
+                    List<String> dezPrimeiras = new ArrayList<>();
+                    Queue<String> fila = new LinkedList<>();
+                    int profundidadeMaxima = 8;
+                    fila.add("");
+
+                    while (dezPrimeiras.size() < 10 && !fila.isEmpty()) {
+                        String palavra = fila.poll();
+                        Pattern pattern = Pattern.compile(expressao);
+                        Matcher matcher = pattern.matcher(palavra);
+                        if (matcher.matches() && palavrasGeradas.add(palavra)) {
+                            dezPrimeiras.add(palavra);
+                        }
+                        if (palavra.length() < profundidadeMaxima) {
+                            for (String c : aux) {
+                                fila.add(palavra + c);
+                            }
+                        }
+                    }
+
+                    if (dezPrimeiras.isEmpty()) {
+                        System.out.println("Nenhuma palavra válida pôde ser gerada para a expressão.");
+                    } else {
+                        System.out.println("10 primeiras palavras válidas geradas:");
+                        for (String palavra : dezPrimeiras) {
+                            System.out.println(palavra);
+                        }
+                    }
                     break;
                 }
                 case 3: {
