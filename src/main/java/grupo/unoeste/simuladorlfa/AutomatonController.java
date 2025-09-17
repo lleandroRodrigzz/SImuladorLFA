@@ -12,6 +12,7 @@ import javafx.scene.control.*;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
+import javafx.scene.layout.HBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
@@ -21,21 +22,25 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
 import javafx.util.Duration;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 public class AutomatonController {
 
     @FXML private Pane drawingPane;
     @FXML private TextField wordTextField;
     @FXML private Button simulateButton;
+    @FXML private Button stepByStepButton;
     @FXML private Button clearButton;
+    @FXML private Button nextStepButton;
+    @FXML private Button prevStepButton;
+    @FXML private Button resetStepButton;
     @FXML private Label resultLabel;
+    @FXML private Label stepInfoLabel;
     @FXML private TextArea logTextArea;
     @FXML private VBox controlPanel;
+    @FXML private HBox stepControlPanel;
+    @FXML private CheckBox showEpsilonTransitionsCheckBox;
+    @FXML private Label automatonTypeLabel;
 
     // --- Modelo de Dados ---
     private final List<Estado> estados = new ArrayList<>();
@@ -52,9 +57,17 @@ public class AutomatonController {
     // --- Para animação da simulação ---
     private final List<Group> highlightedStates = new ArrayList<>();
 
+    // --- Para simulação passo a passo ---
+    private boolean stepByStepMode = false;
+    private String currentWord = "";
+    private int currentStep = 0;
+    private List<Estado> currentPath = new ArrayList<>();
+    private List<String> currentSymbolsUsed = new ArrayList<>();
+    private AutomatonSimulator.SimulationResult lastResult = null;
+
     // --- Constantes para melhorar a usabilidade ---
     private static final double STATE_RADIUS = 25.0;
-    private static final double HIT_RADIUS = 35.0; // Área de clique maior que o círculo visível
+    private static final double HIT_RADIUS = 35.0;
 
     @FXML
     public void initialize() {
@@ -65,22 +78,32 @@ public class AutomatonController {
         logTextArea.setFont(Font.font("Consolas", 12));
         wordTextField.setOnAction(e -> simulateWord());
 
+        // Inicializar controles de passo a passo
+        stepControlPanel.setVisible(false);
+        stepInfoLabel.setText("");
+
+        // Configurar checkbox para mostrar transições epsilon
+        showEpsilonTransitionsCheckBox.setSelected(true);
+        showEpsilonTransitionsCheckBox.setOnAction(e -> updateAutomatonVisualization());
+
         logMessage("Simulador de Autômatos Finitos iniciado!");
         logMessage("- Clique no painel para criar estados.");
         logMessage("- Arraste de um estado para outro para criar transições.");
         logMessage("- Clique direito nos elementos para mais opções.");
         logMessage("- Use vírgulas para múltiplos símbolos: 'a,b,c'");
+        logMessage("- Use 'Passo a Passo' para ver a simulação detalhadamente.");
+
+        updateAutomatonTypeDisplay();
     }
 
     private void setupDrawingPaneEvents() {
-        // Criar estado com clique primário no painel
         drawingPane.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.PRIMARY && event.getTarget() == drawingPane) {
                 criarNovoEstado(event.getX(), event.getY());
+                updateAutomatonTypeDisplay();
             }
         });
 
-        // Desenhar linha temporária ao arrastar para criar transição
         drawingPane.setOnMouseDragged(event -> {
             if (linhaDeTransicaoTemporaria != null) {
                 linhaDeTransicaoTemporaria.setEndX(event.getX());
@@ -88,19 +111,17 @@ public class AutomatonController {
             }
         });
 
-        // Finalizar criação da transição ao soltar o mouse
         drawingPane.setOnMouseReleased(event -> {
             if (estadoOrigemView != null) {
                 Group estadoDestinoView = findNearestStateGroup(event.getX(), event.getY());
 
-                // Se soltou sobre um estado válido
                 if (estadoDestinoView != null) {
                     Estado origem = (Estado) estadoOrigemView.getUserData();
                     Estado destino = (Estado) estadoDestinoView.getUserData();
                     criarNovaTransicao(origem, destino);
+                    updateAutomatonTypeDisplay();
                 }
 
-                // Limpa a linha temporária e reseta a origem
                 if (linhaDeTransicaoTemporaria != null) {
                     drawingPane.getChildren().remove(linhaDeTransicaoTemporaria);
                 }
@@ -112,7 +133,148 @@ public class AutomatonController {
 
     private void setupControlButtons() {
         simulateButton.setOnAction(e -> simulateWord());
+        stepByStepButton.setOnAction(e -> startStepByStepSimulation());
         clearButton.setOnAction(e -> clearAll());
+        nextStepButton.setOnAction(e -> nextStep());
+        prevStepButton.setOnAction(e -> prevStep());
+        resetStepButton.setOnAction(e -> resetStepByStep());
+    }
+
+    // --- SIMULAÇÃO PASSO A PASSO ---
+
+    @FXML
+    private void startStepByStepSimulation() {
+        String word = wordTextField.getText().trim();
+
+        if (word.contains(",")) {
+            showAlert("Aviso", "Simulação passo a passo funciona apenas com uma palavra por vez.\nPrimeira palavra será usada: '" + word.split(",")[0].trim() + "'");
+            word = word.split(",")[0].trim();
+        }
+
+        clearHighlights();
+
+        if (estados.isEmpty()) {
+            showResult("Erro: Nenhum autômato para simular!", false);
+            return;
+        }
+
+        currentWord = word;
+        currentStep = 0;
+        stepByStepMode = true;
+
+        // Executar simulação completa para obter o caminho
+        lastResult = AutomatonSimulator.simulate(estados, transicoes, currentWord);
+        currentPath = lastResult.getPath();
+        currentSymbolsUsed = lastResult.getSymbolsUsed();
+
+        // Mostrar controles de passo a passo
+        stepControlPanel.setVisible(true);
+        simulateButton.setDisable(true);
+        stepByStepButton.setDisable(true);
+
+        logMessage("\n=== INICIANDO SIMULAÇÃO PASSO A PASSO ===");
+        logMessage("Palavra: '" + (currentWord.isEmpty() ? "ε" : currentWord) + "'");
+        logMessage("Caminho encontrado: " + currentPath.size() + " estados");
+
+        // Mostrar primeiro passo
+        updateStepDisplay();
+        updateStepControls();
+    }
+
+    @FXML
+    private void nextStep() {
+        if (currentStep < currentPath.size() - 1) {
+            currentStep++;
+            updateStepDisplay();
+            updateStepControls();
+        }
+    }
+
+    @FXML
+    private void prevStep() {
+        if (currentStep > 0) {
+            currentStep--;
+            updateStepDisplay();
+            updateStepControls();
+        }
+    }
+
+    @FXML
+    private void resetStepByStep() {
+        stepByStepMode = false;
+        currentStep = 0;
+        clearHighlights();
+
+        stepControlPanel.setVisible(false);
+        simulateButton.setDisable(false);
+        stepByStepButton.setDisable(false);
+        stepInfoLabel.setText("");
+        resultLabel.setText("");
+
+        logMessage("=== SIMULAÇÃO PASSO A PASSO FINALIZADA ===\n");
+    }
+
+    private void updateStepDisplay() {
+        clearHighlights();
+
+        if (currentPath.isEmpty() || currentStep >= currentPath.size()) {
+            return;
+        }
+
+        Estado currentState = currentPath.get(currentStep);
+        Group stateView = estadoViews.get(currentState);
+
+        if (stateView != null) {
+            boolean isLastStep = (currentStep == currentPath.size() - 1);
+            boolean isAccepted = isLastStep && lastResult.isAccepted();
+            highlightState(stateView, true, isAccepted);
+        }
+
+        // Atualizar informações do passo
+        StringBuilder stepInfo = new StringBuilder();
+        stepInfo.append("Passo ").append(currentStep + 1).append(" de ").append(currentPath.size());
+        stepInfo.append(" | Estado: ").append(currentState.getNome());
+
+        if (currentStep == 0) {
+            stepInfo.append(" (inicial)");
+        } else {
+            String symbolUsed = currentStep - 1 < currentSymbolsUsed.size() ?
+                    currentSymbolsUsed.get(currentStep - 1) : "?";
+            stepInfo.append(" | Símbolo consumido: '").append(symbolUsed).append("'");
+        }
+
+        if (currentStep == currentPath.size() - 1) {
+            stepInfo.append(" | Estado ").append(currentState.isFinal() ? "FINAL" : "NÃO-FINAL");
+        }
+
+        stepInfoLabel.setText(stepInfo.toString());
+
+        // Mostrar progresso da palavra
+        StringBuilder wordProgress = new StringBuilder();
+        if (currentWord.isEmpty()) {
+            wordProgress.append("Palavra: ε");
+        } else {
+            wordProgress.append("Palavra: ");
+            for (int i = 0; i < currentWord.length(); i++) {
+                if (i < currentStep && currentStep > 0 && i < currentSymbolsUsed.size()) {
+                    wordProgress.append("[").append(currentWord.charAt(i)).append("]");
+                } else if (i == currentStep - 1 && currentStep > 0) {
+                    wordProgress.append("→").append(currentWord.charAt(i)).append("←");
+                } else {
+                    wordProgress.append(currentWord.charAt(i));
+                }
+            }
+        }
+
+        logMessage("Passo " + (currentStep + 1) + ": " + stepInfo.toString());
+        if (currentStep == currentPath.size() - 1) {
+            showResult(lastResult.getMessage(), lastResult.isAccepted());
+        }
+    }
+
+    private void updateStepControls() {
+        nextStepButton.setDisable(currentStep >= currentPath.size() - 1);
+        prevStepButton.setDisable(currentStep <= 0);
     }
 
     // --- MÉTODOS DE CRIAÇÃO E MANIPULAÇÃO DE ESTADOS ---
@@ -134,30 +296,25 @@ public class AutomatonController {
         group.setLayoutX(estado.getX());
         group.setLayoutY(estado.getY());
 
-        // Círculo invisível para área de clique (hitbox)
         Circle hitArea = new Circle(0, 0, HIT_RADIUS, Color.TRANSPARENT);
         hitArea.setId("hit-area");
 
-        // Círculo principal (visual)
         Circle circle = new Circle(0, 0, STATE_RADIUS, Color.LIGHTBLUE);
         circle.setStroke(Color.BLACK);
         circle.setStrokeWidth(2);
         circle.setId("main-circle");
 
-        // Círculo interno para estado final
         Circle innerCircle = new Circle(0, 0, STATE_RADIUS - 5, Color.TRANSPARENT);
         innerCircle.setStroke(Color.BLACK);
         innerCircle.setStrokeWidth(1.5);
         innerCircle.setVisible(false);
         innerCircle.setId("inner-circle");
 
-        // Seta para estado inicial
         Polygon arrow = new Polygon(-STATE_RADIUS - 12, -7.0, -STATE_RADIUS, 0.0, -STATE_RADIUS - 12, 7.0);
         arrow.setFill(Color.BLACK);
         arrow.setVisible(false);
         arrow.setId("initial-arrow");
 
-        // Texto do nome
         Text text = new Text(estado.getNome());
         text.setBoundsType(TextBoundsType.VISUAL);
         text.setFont(Font.font(14));
@@ -167,15 +324,14 @@ public class AutomatonController {
 
         group.getChildren().addAll(hitArea, circle, innerCircle, arrow, text);
 
-        // Listeners para atualizar a view quando o modelo (Estado) muda
         estado.isInicialProperty().addListener((obs, oldVal, newVal) -> {
             arrow.setVisible(newVal);
             if (newVal) {
-                // Garante que apenas um estado seja inicial
                 estados.stream()
                         .filter(e -> e != estado && e.isInicial())
                         .forEach(e -> e.setInicial(false));
                 logMessage("Estado " + estado.getNome() + " marcado como inicial.");
+                updateAutomatonTypeDisplay();
             }
         });
 
@@ -192,7 +348,6 @@ public class AutomatonController {
         Estado estado = (Estado) group.getUserData();
         Circle circle = (Circle) group.lookup("#main-circle");
 
-        // Menu de contexto (clique direito)
         ContextMenu contextMenu = new ContextMenu();
         MenuItem marcarInicialItem = new MenuItem();
         MenuItem marcarFinalItem = new MenuItem();
@@ -212,7 +367,6 @@ public class AutomatonController {
             contextMenu.show(group, event.getScreenX(), event.getScreenY());
         });
 
-        // Iniciar criação de transição (arrastar)
         group.setOnMousePressed(event -> {
             if (event.getButton() == MouseButton.PRIMARY) {
                 estadoOrigemView = group;
@@ -227,7 +381,6 @@ public class AutomatonController {
             }
         });
 
-        // Efeito de highlight ao passar o mouse
         group.setOnMouseEntered(e -> {
             if (!highlightedStates.contains(group)) circle.setStroke(Color.ROYALBLUE);
         });
@@ -265,7 +418,6 @@ public class AutomatonController {
     private void deletarEstado(Group estadoView) {
         Estado estadoParaDeletar = (Estado) estadoView.getUserData();
 
-        // Remove transições conectadas (modelo e view)
         List<Transicao> transicoesParaRemover = new ArrayList<>();
         transicoes.forEach(t -> {
             if (t.getOrigem() == estadoParaDeletar || t.getDestino() == estadoParaDeletar) {
@@ -274,12 +426,12 @@ public class AutomatonController {
         });
         transicoesParaRemover.forEach(this::deletarTransicao);
 
-        // Remove o estado (modelo e view)
         drawingPane.getChildren().remove(estadoView);
         estadoViews.remove(estadoParaDeletar);
         estados.remove(estadoParaDeletar);
 
         logMessage("Estado " + estadoParaDeletar.getNome() + " e suas transições foram deletados.");
+        updateAutomatonTypeDisplay();
     }
 
     // --- MÉTODOS DE CRIAÇÃO E MANIPULAÇÃO DE TRANSIÇÕES ---
@@ -292,7 +444,6 @@ public class AutomatonController {
 
         result.ifPresent(simboloInput -> {
             String simbolo = simboloInput.trim();
-            // Se vazio, usar epsilon
             if (simbolo.isEmpty()) {
                 simbolo = "ε";
             }
@@ -318,30 +469,24 @@ public class AutomatonController {
         Group group = new Group();
 
         if (origem == destino) {
-            // Círculo para o loop (sem alterações aqui)
             Circle loop = new Circle(origem.getX(), origem.getY() - (STATE_RADIUS + 15), 15);
             loop.setFill(Color.TRANSPARENT);
             loop.setStroke(Color.BLACK);
             loop.setStrokeWidth(1.5);
 
-            // Seta para o loop - CORREÇÃO AQUI
-            // Ajusta os pontos para que a seta aponte para a parte superior do círculo do loop
             Polygon arrow = new Polygon();
             arrow.getPoints().addAll(
-                    origem.getX() + 10, origem.getY() - (STATE_RADIUS + 15) - 15, // Ponto inicial (topo do loop)
-                    origem.getX() + 15, origem.getY() - (STATE_RADIUS + 15) - 5,  // Ponto inferior direito
-                    origem.getX() + 5, origem.getY() - (STATE_RADIUS + 15) - 5    // Ponto inferior esquerdo
+                    origem.getX() + 10, origem.getY() - (STATE_RADIUS + 15) - 15,
+                    origem.getX() + 15, origem.getY() - (STATE_RADIUS + 15) - 5,
+                    origem.getX() + 5, origem.getY() - (STATE_RADIUS + 15) - 5
             );
             arrow.setFill(Color.BLACK);
 
-            // Texto (também vamos ajustar a posição para ficar melhor)
             Text texto = new Text(origem.getX() - 10, origem.getY() - (STATE_RADIUS + 35), transicao.getSimbolo());
             texto.setFont(Font.font(12));
 
             group.getChildren().addAll(loop, arrow, texto);
-        }
-        else {
-            // Transição normal
+        } else {
             double angle = Math.atan2(destino.getY() - origem.getY(), destino.getX() - origem.getX());
 
             double startX = origem.getX() + STATE_RADIUS * Math.cos(angle);
@@ -352,7 +497,6 @@ public class AutomatonController {
             Line linha = new Line(startX, startY, endX, endY);
             linha.setStrokeWidth(2.0);
 
-            // Seta na ponta da linha
             double arrowLength = 12;
             double arrowAngle = Math.toRadians(25);
             Polygon arrow = new Polygon();
@@ -363,7 +507,6 @@ public class AutomatonController {
             );
             arrow.setFill(Color.BLACK);
 
-            // Texto no meio da linha
             Text texto = new Text(transicao.getSimbolo());
             texto.setFont(Font.font("Arial", 12));
             double textX = (startX + endX) / 2;
@@ -374,7 +517,6 @@ public class AutomatonController {
             group.getChildren().addAll(linha, arrow, texto);
         }
 
-        // Menu de contexto para a transição
         ContextMenu contextMenu = new ContextMenu();
         MenuItem editarItem = new MenuItem("Editar Símbolo(s)");
         MenuItem deletarItem = new MenuItem("Deletar Transição");
@@ -389,8 +531,6 @@ public class AutomatonController {
         return group;
     }
 
-    // Em grupo.unoeste.simuladorlfa.AutomatonController
-
     private void editarTransicao(Transicao transicao) {
         String header = "Edite o símbolo(s) da transição de " +
                 transicao.getOrigem().getNome() + " para " + transicao.getDestino().getNome() + ":";
@@ -400,35 +540,30 @@ public class AutomatonController {
         result.ifPresent(novoSimboloInput -> {
             String novoSimbolo = novoSimboloInput.trim();
 
-            // 1. Padroniza a entrada: qualquer entrada vazia vira o símbolo "ε"
             if (novoSimbolo.isEmpty()) {
                 novoSimbolo = "ε";
             }
 
-            // 2. Se o símbolo resultante for o mesmo que já existia, não faz nada.
             if (novoSimbolo.equals(transicao.getSimbolo())) {
-                return; // Sai do método pois não houve mudança.
+                return;
             }
 
-            // Se houve mudança, executa a atualização correta:
             String oldTransitionStr = transicao.toString();
 
-            // 3. (Correção anterior) PRIMEIRO, remove a view antiga usando o hashCode antigo.
             Node oldView = transicaoViews.remove(transicao);
             if (oldView != null) {
                 drawingPane.getChildren().remove(oldView);
             }
 
-            // 4. AGORA, atualiza o modelo de dados.
             transicao.setSimbolo(novoSimbolo);
 
-            // 5. E por fim, cria e adiciona a nova visualização.
             Node newView = criarVisualizacaoTransicao(transicao);
             transicaoViews.put(transicao, newView);
             drawingPane.getChildren().add(newView);
             newView.toBack();
 
             logMessage("Transição " + oldTransitionStr + " editada para: " + transicao);
+            updateAutomatonTypeDisplay();
         });
     }
 
@@ -439,12 +574,17 @@ public class AutomatonController {
         }
         transicoes.remove(transicao);
         logMessage("Transição deletada: " + transicao);
+        updateAutomatonTypeDisplay();
     }
 
-    // --- LÓGICA DA SIMULAÇÃO ---
+    // --- SIMULAÇÃO NORMAL ---
 
     @FXML
     private void simulateWord() {
+        if (stepByStepMode) {
+            return; // Não permitir simulação normal durante passo a passo
+        }
+
         String fullInput = wordTextField.getText();
         clearHighlights();
 
@@ -456,7 +596,6 @@ public class AutomatonController {
         String[] wordsToTest = fullInput.split(",");
         boolean isBatchProcessing = wordsToTest.length > 1;
 
-        // Animação mestre que vai conter todas as outras em sequência
         SequentialTransition masterAnimation = new SequentialTransition();
 
         logMessage(isBatchProcessing ? "\n=== INICIANDO SIMULAÇÃO EM LOTE ===" : "\n=== SIMULANDO PALAVRA ===");
@@ -475,9 +614,7 @@ public class AutomatonController {
                 acceptedCount++;
             }
 
-            // Se um caminho foi encontrado, cria e adiciona sua animação à fila
             if (!result.getPath().isEmpty()) {
-                // Log do caminho
                 logMessage("Caminho percorrido:");
                 StringBuilder pathLog = new StringBuilder("  " + result.getPath().get(0).getNome());
                 List<String> symbolsUsed = result.getSymbolsUsed();
@@ -487,29 +624,24 @@ public class AutomatonController {
                 }
                 logMessage(pathLog.toString());
 
-                // Cria a animação para esta palavra
                 SequentialTransition pathAnimation = createPathAnimation(result.getPath(), result.isAccepted());
                 masterAnimation.getChildren().add(pathAnimation);
 
-                // Adiciona uma pausa maior entre as palavras para limpar a tela e dar um respiro
                 PauseTransition separatorPause = new PauseTransition(Duration.seconds(1.5));
                 separatorPause.setOnFinished(e -> clearHighlights());
                 masterAnimation.getChildren().add(separatorPause);
             }
         }
 
-        // Atualiza o label de resultado com um resumo
         if (isBatchProcessing) {
             String summary = String.format("Lote concluído: %d de %d palavras aceitas.", acceptedCount, wordsToTest.length);
             showResult(summary, acceptedCount > 0);
             logMessage("\n=== FIM DA SIMULAÇÃO EM LOTE ===");
         } else if (wordsToTest.length == 1) {
-            // Se for apenas uma palavra, mostra o resultado dela
             AutomatonSimulator.SimulationResult singleResult = AutomatonSimulator.simulate(estados, transicoes, wordsToTest[0].trim());
             showResult(singleResult.getMessage(), singleResult.isAccepted());
         }
 
-        // Inicia a execução de TODAS as animações em sequência
         masterAnimation.play();
     }
 
@@ -522,21 +654,18 @@ public class AutomatonController {
             Group stateView = estadoViews.get(estado);
 
             if (stateView != null) {
-                // Pausa entre a coloração de cada estado no caminho
                 PauseTransition pause = new PauseTransition(Duration.seconds(0.7));
                 pause.setOnFinished(e -> {
-                    // Remove o highlight do estado anterior (se não for o primeiro)
                     if (index > 0) {
                         highlightState(estadoViews.get(path.get(index - 1)), false, false);
                     }
-                    // Adiciona highlight no estado atual
                     boolean isFinalStep = (index == path.size() - 1);
                     highlightState(stateView, true, isFinalStep && accepted);
                 });
                 animation.getChildren().add(pause);
             }
         }
-        return animation; // Retorna a animação em vez de dar .play()
+        return animation;
     }
 
     private void highlightState(Group stateView, boolean highlight, boolean isFinalAndAccepted) {
@@ -629,8 +758,58 @@ public class AutomatonController {
         resultLabel.setStyle("-fx-font-weight: bold;");
     }
 
+    private void showAlert(String title, String message) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+    private void updateAutomatonTypeDisplay() {
+        if (estados.isEmpty()) {
+            automatonTypeLabel.setText("Tipo: Nenhum autômato");
+            return;
+        }
+
+        boolean isDeterministic = AutomatonSimulator.isDeterministicPublic(transicoes);
+        boolean hasInitialState = estados.stream().anyMatch(Estado::isInicial);
+        boolean hasFinalState = estados.stream().anyMatch(Estado::isFinal);
+
+        StringBuilder typeInfo = new StringBuilder();
+        typeInfo.append("Tipo: ").append(isDeterministic ? "AFD" : "AFND");
+
+        if (!hasInitialState) {
+            typeInfo.append(" [SEM ESTADO INICIAL]");
+        }
+        if (!hasFinalState) {
+            typeInfo.append(" [SEM ESTADO FINAL]");
+        }
+
+        automatonTypeLabel.setText(typeInfo.toString());
+        automatonTypeLabel.setTextFill(hasInitialState && hasFinalState ? Color.BLACK : Color.RED);
+    }
+
+    private void updateAutomatonVisualization() {
+        // Atualizar visibilidade de transições epsilon se necessário
+        boolean showEpsilon = showEpsilonTransitionsCheckBox.isSelected();
+
+        transicaoViews.forEach((transicao, view) -> {
+            if (transicao.isEpsilon() && !showEpsilon) {
+                view.setVisible(false);
+            } else {
+                view.setVisible(true);
+            }
+        });
+    }
+
     @FXML
     private void clearAll() {
+        // Resetar modo passo a passo se estiver ativo
+        if (stepByStepMode) {
+            resetStepByStep();
+        }
+
         drawingPane.getChildren().clear();
         estados.clear();
         transicoes.clear();
@@ -643,6 +822,7 @@ public class AutomatonController {
         resultLabel.setText("");
         logTextArea.clear();
 
+        updateAutomatonTypeDisplay();
         logMessage("Tudo limpo! Simulador reiniciado.");
     }
 
@@ -651,5 +831,117 @@ public class AutomatonController {
             logTextArea.appendText(message + "\n");
             logTextArea.setScrollTop(Double.MAX_VALUE);
         });
+    }
+
+    // --- MÉTODOS PARA EXPORTAR/IMPORTAR AUTÔMATO ---
+
+    @FXML
+    private void exportAutomaton() {
+        if (estados.isEmpty()) {
+            showAlert("Aviso", "Nenhum autômato para exportar!");
+            return;
+        }
+
+        StringBuilder export = new StringBuilder();
+        export.append("=== AUTÔMATO EXPORTADO ===\n");
+        export.append("Estados: ").append(estados.size()).append("\n");
+        export.append("Transições: ").append(transicoes.size()).append("\n");
+        export.append("Tipo: ").append(AutomatonSimulator.isDeterministicPublic(transicoes) ? "AFD" : "AFND").append("\n\n");
+
+        export.append("ESTADOS:\n");
+        for (Estado estado : estados) {
+            export.append("- ").append(estado.getNome());
+            if (estado.isInicial()) export.append(" (inicial)");
+            if (estado.isFinal()) export.append(" (final)");
+            export.append(" [").append(estado.getX()).append(",").append(estado.getY()).append("]\n");
+        }
+
+        export.append("\nTRANSIÇÕES:\n");
+        for (Transicao transicao : transicoes) {
+            export.append("- ").append(transicao.getOrigem().getNome())
+                    .append(" --[").append(transicao.getSimbolo()).append("]--> ")
+                    .append(transicao.getDestino().getNome()).append("\n");
+        }
+
+        logMessage("\n" + export.toString());
+        logMessage("Autômato exportado para o log!");
+    }
+
+    @FXML
+    private void showAutomatonInfo() {
+        if (estados.isEmpty()) {
+            showAlert("Informações do Autômato", "Nenhum autômato criado ainda!");
+            return;
+        }
+
+        StringBuilder info = new StringBuilder();
+        info.append("=== INFORMAÇÕES DO AUTÔMATO ===\n\n");
+
+        // Informações gerais
+        info.append("Número de estados: ").append(estados.size()).append("\n");
+        info.append("Número de transições: ").append(transicoes.size()).append("\n");
+
+        boolean isDeterministic = AutomatonSimulator.isDeterministicPublic(transicoes);
+        info.append("Tipo: ").append(isDeterministic ? "Autômato Finito Determinístico (AFD)" : "Autômato Finito Não-Determinístico (AFND)").append("\n");
+
+        // Estados especiais
+        long initialStates = estados.stream().filter(Estado::isInicial).count();
+        long finalStates = estados.stream().filter(Estado::isFinal).count();
+
+        info.append("Estados iniciais: ").append(initialStates).append("\n");
+        info.append("Estados finais: ").append(finalStates).append("\n\n");
+
+        // Alfabeto
+        Set<String> alfabeto = new HashSet<>();
+        for (Transicao t : transicoes) {
+            for (String simbolo : t.getSimbolos()) {
+                if (!simbolo.equals("ε")) {
+                    alfabeto.add(simbolo);
+                }
+            }
+        }
+        info.append("Alfabeto: {").append(String.join(", ", alfabeto)).append("}\n");
+
+        // Transições epsilon
+        long epsilonTransitions = transicoes.stream().filter(Transicao::isEpsilon).count();
+        if (epsilonTransitions > 0) {
+            info.append("Transições ε: ").append(epsilonTransitions).append("\n");
+        }
+
+        // Verificações de completude
+        info.append("\n=== ANÁLISE DE COMPLETUDE ===\n");
+        if (initialStates == 0) {
+            info.append("⚠ Aviso: Nenhum estado inicial definido\n");
+        } else if (initialStates > 1) {
+            info.append("⚠ Aviso: Múltiplos estados iniciais (característico de AFND)\n");
+        }
+
+        if (finalStates == 0) {
+            info.append("⚠ Aviso: Nenhum estado final definido\n");
+        }
+
+        if (isDeterministic && alfabeto.size() > 0) {
+            // Verificar se AFD é completo
+            boolean isComplete = true;
+            for (Estado estado : estados) {
+                for (String simbolo : alfabeto) {
+                    boolean hasTransition = transicoes.stream()
+                            .anyMatch(t -> t.getOrigem().equals(estado) && t.aceitaSimbolo(simbolo));
+                    if (!hasTransition) {
+                        isComplete = false;
+                        break;
+                    }
+                }
+                if (!isComplete) break;
+            }
+            info.append(isComplete ? "✓ AFD completo" : "○ AFD incompleto").append("\n");
+        }
+
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Informações do Autômato");
+        alert.setHeaderText("Análise do Autômato Atual");
+        alert.setContentText(info.toString());
+        alert.getDialogPane().setPrefWidth(500);
+        alert.showAndWait();
     }
 }

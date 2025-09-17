@@ -3,47 +3,108 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Font?>
 
 <BorderPane xmlns="http://javafx.com/javafx/11.0.1" xmlns:fx="http://javafx.com/fxml/1" fx:controller="grupo.unoeste.simuladorlfa.AutomatonController">
     <center>
-        <Pane fx:id="drawingPane" style="-fx-background-color: #f8f9fa; -fx-border-color: #dee2e6; -fx-border-width: 2;">
-            <cursor>
-                <javafx.scene.Cursor fx:constant="CROSSHAIR" />
-            </cursor>
-        </Pane>
+        <Pane fx:id="drawingPane" prefHeight="600.0" prefWidth="800.0" style="-fx-background-color: white; -fx-border-color: #cccccc; -fx-border-width: 1px;" />
     </center>
     <right>
-        <VBox fx:id="controlPanel" prefWidth="300.0" spacing="10.0" style="-fx-background-color: #ffffff; -fx-padding: 15; -fx-border-color: #dee2e6; -fx-border-width: 0 0 0 2;">
+        <VBox fx:id="controlPanel" maxWidth="420.0" minWidth="420.0" prefWidth="320.0" spacing="10.0" style="-fx-background-color: #f5f5f5; -fx-padding: 15;">
             <children>
-                <Label style="-fx-font-size: 18; -fx-font-weight: bold;" text="Simulador de Autômatos" />
+                <Label text="Simulador de Autômatos Finitos" textAlignment="CENTER">
+                    <font>
+                        <Font name="System Bold" size="16.0" />
+                    </font>
+                </Label>
+
+                <VBox spacing="5.0" style="-fx-background-color: white; -fx-padding: 10; -fx-border-color: #dddddd; -fx-border-width: 1px; -fx-border-radius: 5px;">
+                    <children>
+                        <Label text="Informações do Autômato:" style="-fx-font-weight: bold;" />
+                        <Label fx:id="automatonTypeLabel" text="Tipo: Nenhum autômato" />
+                        <HBox spacing="10.0">
+                            <children>
+                                <Button onAction="#showAutomatonInfo" text="Analisar" />
+                                <Button onAction="#exportAutomaton" text="Exportar" />
+                            </children>
+                        </HBox>
+                    </children>
+                </VBox>
 
                 <Separator />
 
-                <Label style="-fx-font-size: 14; -fx-font-weight: bold;" text="Testar Palavra:" />
-                <TextField fx:id="wordTextField" promptText="Digite a palavra para testar..." style="-fx-font-size: 14;" />
-
-                <HBox spacing="10.0">
+                <VBox spacing="5.0">
                     <children>
-                        <Button fx:id="simulateButton" style="-fx-background-color: #007bff; -fx-text-fill: white; -fx-font-weight: bold;" text="Simular" />
-                        <Button fx:id="clearButton" style="-fx-background-color: #dc3545; -fx-text-fill: white; -fx-font-weight: bold;" text="Limpar Tudo" />
+                        <Label text="Palavra(s) para simular:" style="-fx-font-weight: bold;" />
+                        <TextField fx:id="wordTextField" promptText="Digite a palavra ou palavras separadas por vírgula" />
+                        <Label text="Dica: Use vírgulas para testar múltiplas palavras" style="-fx-font-size: 10px; -fx-text-fill: #666666;" />
+                    </children>
+                </VBox>
+
+                <VBox spacing="5.0">
+                    <children>
+                        <Button fx:id="simulateButton" maxWidth="Infinity" onAction="#simulateWord" prefHeight="35.0" style="-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-weight: bold;" text="Simular Palavra(s)" />
+                        <Button fx:id="stepByStepButton" maxWidth="Infinity" onAction="#startStepByStepSimulation" prefHeight="35.0" style="-fx-background-color: #2196F3; -fx-text-fill: white; -fx-font-weight: bold;" text="Simulação Passo a Passo" />
+                    </children>
+                </VBox>
+
+                <HBox fx:id="stepControlPanel" spacing="3.0" style="-fx-background-color: #e3f2fd; -fx-padding: 10; -fx-border-color: #2196F3; -fx-border-width: 1px; -fx-border-radius: 5px;" visible="false">
+                    <children>
+                        <Label fx:id="stepInfoLabel" text="" wrapText="true" />
+                        <HBox spacing="5.0">
+                            <children>
+                                <Button fx:id="prevStepButton" onAction="#prevStep" text="◀" />
+                                <Button fx:id="nextStepButton" onAction="#nextStep" text="▶" />
+                                <Button fx:id="resetStepButton" onAction="#resetStepByStep" text="X" />
+                            </children>
+                        </HBox>
                     </children>
                 </HBox>
 
-                <Label fx:id="resultLabel" style="-fx-font-size: 14; -fx-font-weight: bold; -fx-wrap-text: true;" wrapText="true" />
+                <VBox spacing="5.0">
+                    <children>
+                        <Label text="Resultado:" style="-fx-font-weight: bold;" />
+                        <Label fx:id="resultLabel" text="" wrapText="true" />
+                    </children>
+                </VBox>
 
                 <Separator />
 
-                <Label style="-fx-font-size: 14; -fx-font-weight: bold;" text="Log de Atividades:" />
-                <TextArea fx:id="logTextArea" editable="false" prefHeight="200.0" style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 11;" wrapText="true" />
+                <VBox spacing="5.0">
+                    <children>
+                        <Label text="Opções de Visualização:" style="-fx-font-weight: bold;" />
+                        <CheckBox fx:id="showEpsilonTransitionsCheckBox" selected="true" text="Mostrar transições ε" />
+                    </children>
+                </VBox>
+
+                <Button fx:id="clearButton" maxWidth="Infinity" onAction="#clearAll" style="-fx-background-color: #f44336; -fx-text-fill: white;" text="Limpar Tudo" />
 
                 <Separator />
 
-                <Label style="-fx-font-size: 12; -fx-font-weight: bold;" text="Como usar:" />
-                <Label style="-fx-font-size: 11; -fx-wrap-text: true;" text="• Clique no painel para criar estados" wrapText="true" />
-                <Label style="-fx-font-size: 11; -fx-wrap-text: true;" text="• Arraste entre estados para criar transições" wrapText="true" />
-                <Label style="-fx-font-size: 11; -fx-wrap-text: true;" text="• Clique direito nos elementos para mais opções" wrapText="true" />
-                <Label style="-fx-font-size: 11; -fx-wrap-text: true;" text="• Use ε para transições epsilon" wrapText="true" />
+                <VBox spacing="5.0">
+                    <children>
+                        <Label text="Instruções:" style="-fx-font-weight: bold;" />
+                        <Label text="• Clique no painel para criar estados" wrapText="true" />
+                        <Label text="• Arraste entre estados para criar transições" wrapText="true" />
+                        <Label text="• Clique direito para opções" wrapText="true" />
+                        <Label text="• Use 'a,b,c' para múltiplos símbolos" wrapText="true" />
+                        <Label text="• Campo vazio = transição ε" wrapText="true" />
+                    </children>
+                </VBox>
             </children>
         </VBox>
     </right>
+    <bottom>
+        <VBox>
+            <children>
+                <!-- Log da Simulação -->
+                <Label text="Log da Simulação:" style="-fx-font-weight: bold; -fx-padding: 5 0 0 10;" />
+                <TextArea fx:id="logTextArea" editable="false" prefHeight="150.0" style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 11px;" wrapText="true">
+                    <VBox.margin>
+                        <Insets bottom="5.0" left="5.0" right="5.0" />
+                    </VBox.margin>
+                </TextArea>
+            </children>
+        </VBox>
+    </bottom>
 </BorderPane>

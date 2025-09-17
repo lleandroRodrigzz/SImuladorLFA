@@ -29,6 +29,26 @@ public class AutomatonSimulator {
         public String getMessage() { return message; }
     }
 
+    // Classe para representar uma configuração do autômato durante a simulação
+    public static class Configuration {
+        private final Estado estado;
+        private final int posicao;
+        private final List<Estado> caminho;
+        private final List<String> simbolosUsados;
+
+        public Configuration(Estado estado, int posicao, List<Estado> caminho, List<String> simbolosUsados) {
+            this.estado = estado;
+            this.posicao = posicao;
+            this.caminho = new ArrayList<>(caminho);
+            this.simbolosUsados = new ArrayList<>(simbolosUsados);
+        }
+
+        public Estado getEstado() { return estado; }
+        public int getPosicao() { return posicao; }
+        public List<Estado> getCaminho() { return new ArrayList<>(caminho); }
+        public List<String> getSimbolosUsados() { return new ArrayList<>(simbolosUsados); }
+    }
+
     public static SimulationResult simulate(List<Estado> estados, List<Transicao> transicoes, String word) {
         if (word == null) word = "";
 
@@ -54,6 +74,11 @@ public class AutomatonSimulator {
         } else {
             return simulateNFA(estadoInicial, transicoes, word);
         }
+    }
+
+    // Método público para verificar determinismo (usado pelo controller)
+    public static boolean isDeterministicPublic(List<Transicao> transicoes) {
+        return isDeterministic(transicoes);
     }
 
     private static boolean isDeterministic(List<Transicao> transicoes) {
@@ -112,101 +137,107 @@ public class AutomatonSimulator {
         }
 
         boolean aceito = estadoAtual.isFinal();
-        String mensagem = aceito ? "Palavra aceita!" :
+        String mensagem = aceito ? "Palavra aceita pelo AFD!" :
                 String.format("Palavra rejeitada - terminou no estado %s (não final)", estadoAtual.getNome());
 
         return new SimulationResult(aceito, caminho, simbolosUsados, word, mensagem);
     }
 
     private static SimulationResult simulateNFA(Estado estadoInicial, List<Transicao> transicoes, String word) {
-        // Implementação correta de NFA com epsilon closure
-        List<Estado> caminhoValido = new ArrayList<>();
-        List<String> simbolosUsados = new ArrayList<>();
+        // Implementação melhorada do NFA com busca em largura
+        return simulateNFABreadthFirst(estadoInicial, transicoes, word);
+    }
+
+    private static SimulationResult simulateNFABreadthFirst(Estado estadoInicial, List<Transicao> transicoes, String word) {
+        Queue<Configuration> fila = new LinkedList<>();
+        Set<String> visitados = new HashSet<>();
 
         // Aplicar epsilon closure no estado inicial
         Set<Estado> estadosIniciais = epsilonClosure(Set.of(estadoInicial), transicoes);
 
-        boolean resultado = false;
-        // Tentar encontrar um caminho válido a partir de qualquer estado no epsilon closure inicial
-        for (Estado estadoInicio : estadosIniciais) {
-            caminhoValido.clear();
-            simbolosUsados.clear();
-            if (simulateNFARecursive(estadoInicio, transicoes, word, 0,
-                    new HashSet<>(), caminhoValido, simbolosUsados)) {
-                resultado = true;
-                break;
+        // Adicionar todas as configurações iniciais na fila
+        for (Estado estado : estadosIniciais) {
+            List<Estado> caminhoInicial = new ArrayList<>();
+            List<String> simbolosInicial = new ArrayList<>();
+            caminhoInicial.add(estadoInicial);
+
+            // Se chegou por epsilon transition, adicionar ao caminho
+            if (!estado.equals(estadoInicial)) {
+                caminhoInicial.add(estado);
+                simbolosInicial.add("ε");
             }
+
+            fila.offer(new Configuration(estado, 0, caminhoInicial, simbolosInicial));
         }
 
-        if (!caminhoValido.isEmpty() && resultado) {
-            return new SimulationResult(true, caminhoValido, simbolosUsados, word, "Palavra aceita pelo NFA!");
-        } else {
-            // Se não encontrou caminho válido, tenta mostrar um caminho parcial
-            List<Estado> caminhoFalha = new ArrayList<>();
-            List<String> simbolosFalha = new ArrayList<>();
-            simulateNFAPartial(estadoInicial, transicoes, word, caminhoFalha, simbolosFalha);
+        while (!fila.isEmpty()) {
+            Configuration config = fila.poll();
 
-            return new SimulationResult(false, caminhoFalha, simbolosFalha, word, "Palavra rejeitada pelo NFA!");
-        }
-    }
+            // Evitar loops infinitos
+            String chave = config.getEstado().getNome() + ":" + config.getPosicao();
+            if (visitados.contains(chave)) {
+                continue;
+            }
+            visitados.add(chave);
 
-    private static boolean simulateNFARecursive(Estado estadoAtual, List<Transicao> transicoes, String word,
-                                                int indice, Set<String> visitados,
-                                                List<Estado> caminho, List<String> simbolosUsados) {
-        // Evitar loops infinitos em epsilon transitions com limite de profundidade
-        String chave = estadoAtual.getNome() + ":" + indice;
-        if (visitados.contains(chave)) {
-            return false;
-        }
-        visitados.add(chave);
+            // Se processou toda a palavra
+            if (config.getPosicao() >= word.length()) {
+                if (config.getEstado().isFinal()) {
+                    return new SimulationResult(true, config.getCaminho(), config.getSimbolosUsados(), word,
+                            "Palavra aceita pelo AFND!");
+                }
+                continue;
+            }
 
-        caminho.add(estadoAtual);
+            String simboloAtual = String.valueOf(word.charAt(config.getPosicao()));
 
-        // Se processou toda a palavra
-        if (indice >= word.length()) {
-            // Ainda pode usar epsilon transitions para chegar a um estado final
+            // Processar transições normais
             for (Transicao t : transicoes) {
-                if (t.getOrigem().equals(estadoAtual) && t.isEpsilon()) {
-                    simbolosUsados.add("ε");
-                    if (simulateNFARecursive(t.getDestino(), transicoes, word, indice,
-                            new HashSet<>(visitados), caminho, simbolosUsados)) {
-                        return true;
+                if (t.getOrigem().equals(config.getEstado()) && t.aceitaSimbolo(simboloAtual)) {
+                    List<Estado> novoCaminho = new ArrayList<>(config.getCaminho());
+                    List<String> novosSimbolos = new ArrayList<>(config.getSimbolosUsados());
+
+                    novoCaminho.add(t.getDestino());
+                    novosSimbolos.add(simboloAtual);
+
+                    // Aplicar epsilon closure no estado destino
+                    Set<Estado> closure = epsilonClosure(Set.of(t.getDestino()), transicoes);
+                    for (Estado estadoClosure : closure) {
+                        List<Estado> caminhoFinal = new ArrayList<>(novoCaminho);
+                        List<String> simbolosFinal = new ArrayList<>(novosSimbolos);
+
+                        if (!estadoClosure.equals(t.getDestino())) {
+                            caminhoFinal.add(estadoClosure);
+                            simbolosFinal.add("ε");
+                        }
+
+                        fila.offer(new Configuration(estadoClosure, config.getPosicao() + 1,
+                                caminhoFinal, simbolosFinal));
                     }
-                    simbolosUsados.remove(simbolosUsados.size() - 1);
                 }
             }
-            // Verifica se é estado final
-            return estadoAtual.isFinal();
-        }
 
-        String simboloAtual = String.valueOf(word.charAt(indice));
+            // Processar epsilon transições sem consumir símbolo
+            for (Transicao t : transicoes) {
+                if (t.getOrigem().equals(config.getEstado()) && t.isEpsilon()) {
+                    List<Estado> novoCaminho = new ArrayList<>(config.getCaminho());
+                    List<String> novosSimbolos = new ArrayList<>(config.getSimbolosUsados());
 
-        // Primeiro, tenta transições normais (não-epsilon)
-        for (Transicao t : transicoes) {
-            if (t.getOrigem().equals(estadoAtual) && t.aceitaSimbolo(simboloAtual)) {
-                simbolosUsados.add(simboloAtual);
-                if (simulateNFARecursive(t.getDestino(), transicoes, word, indice + 1,
-                        new HashSet<>(visitados), caminho, simbolosUsados)) {
-                    return true;
+                    novoCaminho.add(t.getDestino());
+                    novosSimbolos.add("ε");
+
+                    fila.offer(new Configuration(t.getDestino(), config.getPosicao(),
+                            novoCaminho, novosSimbolos));
                 }
-                simbolosUsados.remove(simbolosUsados.size() - 1);
             }
         }
 
-        // Depois, tenta epsilon transitions sem consumir símbolo
-        for (Transicao t : transicoes) {
-            if (t.getOrigem().equals(estadoAtual) && t.isEpsilon()) {
-                simbolosUsados.add("ε");
-                if (simulateNFARecursive(t.getDestino(), transicoes, word, indice,
-                        new HashSet<>(visitados), caminho, simbolosUsados)) {
-                    return true;
-                }
-                simbolosUsados.remove(simbolosUsados.size() - 1);
-            }
-        }
+        // Se não encontrou caminho de aceitação, tentar mostrar um caminho parcial
+        List<Estado> caminhoFalha = new ArrayList<>();
+        List<String> simbolosFalha = new ArrayList<>();
+        simulateNFAPartial(estadoInicial, transicoes, word, caminhoFalha, simbolosFalha);
 
-        caminho.remove(caminho.size() - 1);
-        return false;
+        return new SimulationResult(false, caminhoFalha, simbolosFalha, word, "Palavra rejeitada pelo AFND!");
     }
 
     private static Set<Estado> epsilonClosure(Set<Estado> estados, List<Transicao> transicoes) {
@@ -253,5 +284,147 @@ public class AutomatonSimulator {
                 break;
             }
         }
+    }
+
+    // --- MÉTODOS PARA ANÁLISE DO AUTÔMATO ---
+
+    public static Set<String> getAlphabet(List<Transicao> transicoes) {
+        Set<String> alfabeto = new HashSet<>();
+        for (Transicao t : transicoes) {
+            for (String simbolo : t.getSimbolos()) {
+                if (!simbolo.equals("ε")) {
+                    alfabeto.add(simbolo);
+                }
+            }
+        }
+        return alfabeto;
+    }
+
+    public static boolean isComplete(List<Estado> estados, List<Transicao> transicoes) {
+        if (!isDeterministic(transicoes)) {
+            return false; // Completude só faz sentido para AFDs
+        }
+
+        Set<String> alfabeto = getAlphabet(transicoes);
+        if (alfabeto.isEmpty()) {
+            return true; // Autômato vazio é tecnicamente completo
+        }
+
+        // Verificar se cada estado tem transição para cada símbolo do alfabeto
+        for (Estado estado : estados) {
+            for (String simbolo : alfabeto) {
+                boolean hasTransition = transicoes.stream()
+                        .anyMatch(t -> t.getOrigem().equals(estado) && t.aceitaSimbolo(simbolo));
+                if (!hasTransition) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    public static List<Estado> getUnreachableStates(List<Estado> estados, List<Transicao> transicoes) {
+        Estado estadoInicial = estados.stream()
+                .filter(Estado::isInicial)
+                .findFirst()
+                .orElse(null);
+
+        if (estadoInicial == null) {
+            return new ArrayList<>(estados); // Todos são inalcançáveis se não há inicial
+        }
+
+        Set<Estado> alcancaveis = new HashSet<>();
+        Queue<Estado> fila = new LinkedList<>();
+        fila.offer(estadoInicial);
+        alcancaveis.add(estadoInicial);
+
+        while (!fila.isEmpty()) {
+            Estado atual = fila.poll();
+
+            for (Transicao t : transicoes) {
+                if (t.getOrigem().equals(atual) && !alcancaveis.contains(t.getDestino())) {
+                    alcancaveis.add(t.getDestino());
+                    fila.offer(t.getDestino());
+                }
+            }
+        }
+
+        List<Estado> inalcancaveis = new ArrayList<>();
+        for (Estado estado : estados) {
+            if (!alcancaveis.contains(estado)) {
+                inalcancaveis.add(estado);
+            }
+        }
+        return inalcancaveis;
+    }
+
+    public static boolean hasDeadStates(List<Estado> estados, List<Transicao> transicoes) {
+        // Estado morto: não consegue alcançar nenhum estado final
+        for (Estado estado : estados) {
+            if (!estado.isFinal() && !canReachFinalState(estado, estados, transicoes)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean canReachFinalState(Estado estado, List<Estado> estados, List<Transicao> transicoes) {
+        Set<Estado> visitados = new HashSet<>();
+        Queue<Estado> fila = new LinkedList<>();
+        fila.offer(estado);
+        visitados.add(estado);
+
+        while (!fila.isEmpty()) {
+            Estado atual = fila.poll();
+
+            if (atual.isFinal()) {
+                return true;
+            }
+
+            for (Transicao t : transicoes) {
+                if (t.getOrigem().equals(atual) && !visitados.contains(t.getDestino())) {
+                    visitados.add(t.getDestino());
+                    fila.offer(t.getDestino());
+                }
+            }
+        }
+        return false;
+    }
+
+    // Método para validar se o autômato está bem formado
+    public static List<String> validateAutomaton(List<Estado> estados, List<Transicao> transicoes) {
+        List<String> problemas = new ArrayList<>();
+
+        if (estados.isEmpty()) {
+            problemas.add("Nenhum estado definido");
+            return problemas;
+        }
+
+        // Verificar estado inicial
+        long initialStates = estados.stream().filter(Estado::isInicial).count();
+        if (initialStates == 0) {
+            problemas.add("Nenhum estado inicial definido");
+        } else if (initialStates > 1) {
+            problemas.add("Múltiplos estados iniciais (característico de AFND)");
+        }
+
+        // Verificar estados finais
+        if (estados.stream().noneMatch(Estado::isFinal)) {
+            problemas.add("Nenhum estado final definido");
+        }
+
+        // Verificar estados inalcançáveis
+        List<Estado> inalcancaveis = getUnreachableStates(estados, transicoes);
+        if (!inalcancaveis.isEmpty()) {
+            problemas.add("Estados inalcançáveis encontrados: " +
+                    inalcancaveis.stream().map(Estado::getNome).reduce((a, b) -> a + ", " + b).orElse(""));
+        }
+
+        // Verificar estados mortos (apenas para AFD)
+        if (isDeterministic(transicoes) && hasDeadStates(estados, transicoes)) {
+            problemas.add("Estados mortos encontrados (não alcançam estado final)");
+        }
+
+        return problemas;
     }
 }
