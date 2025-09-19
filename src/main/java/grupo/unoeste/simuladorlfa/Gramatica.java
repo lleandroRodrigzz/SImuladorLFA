@@ -43,7 +43,7 @@ public class Gramatica {
             System.out.println("\n==== MENU ====");
             System.out.println("1 - Validar palavra (direto)");
             System.out.println("2 - Validar palavra (step by step)");
-            System.out.println("3 - Mostrar transições");
+            System.out.println("3 - Mostrar produções");
             System.out.println("4 - Gerar GVTPS");
             System.out.println("5 - Gerar 10 primeiras palavras da linguagem");
             System.out.println("6 - Sair");
@@ -88,14 +88,23 @@ public class Gramatica {
     }
 
     public static void mostrarTransicoes(List<Variavel> var) {
+        System.out.println("P = {");
         for (Variavel variavelAtual : var) {
-            System.out.println("Transições da variável " + variavelAtual.getNome() + ":");
+            System.out.print("     " + variavelAtual.getNome() + " -> ");
+            int i = 0;
             for (String simbolo : variavelAtual.getTransicoes().keySet()) {
                 Variavel destino = variavelAtual.getTransicoes().get(simbolo);
-                System.out.println("  " + variavelAtual.getNome() + " --" + simbolo + "--> " +
-                        (destino != null ? destino.getNome() : "ε"));
+                if (i < variavelAtual.getTransicoes().size() - 1)
+                    System.out.print(simbolo +
+                        (destino != null ? destino.getNome() : "") + "|");
+                else
+                    System.out.print(simbolo +
+                            (destino != null ? destino.getNome() : ""));
+                i++;
             }
+            System.out.println();
         }
+        System.out.println("}");
     }
 
     public static void validarDireto(List<Variavel> var, Scanner scanner) {
